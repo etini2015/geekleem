@@ -1,0 +1,346 @@
+package com.etini.geekleem.activities;
+
+import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+import com.android.volley.DefaultRetryPolicy;
+import com.android.volley.Request;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.StringRequest;
+import com.bumptech.glide.Glide;
+import com.etini.geekleem.R;
+import com.etini.geekleem.adapter.ChatListAdapter;
+import com.etini.geekleem.model.Chat;
+import com.etini.geekleem.utils.AppController;
+import com.etini.geekleem.utils.ImageRequestHandler;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
+
+import de.hdodenhof.circleimageview.CircleImageView;
+import static android.view.View.GONE;
+
+public class ChatActivity extends AppCompatActivity {
+    private RecyclerView mChatRecyclerView;
+    private ChatListAdapter mChatAdapter;
+    private CircleImageView civChatProfileImage;
+    private TextView tv_recipient, tv_bio, tv_info;
+    private EditText et_chat;
+    private Button bt_chat;
+    ImageView iv_scroll;
+    private String recipient_dp;
+    private String bio;
+    String user;
+    private LinearLayoutManager layoutManager;
+    private RelativeLayout rl_chat;
+    SharedPreferences userPreferences;
+    public static final String UserPREFERENCES = "user";
+    public static final String User = "user";
+    String username;
+    //url to uploading chat
+    public static final String UPLOAD_CHAT_URL = "https://geekleem.com.ng/upload_chat.php";
+    //url to get chat
+    public static final String URL_GET_CHAT = "https://geekleem.com.ng/my_chat.php";
+    List<Chat> data;
+    private static final String NOTIFY_CHAT_URL ="https://geekleem.com.ng/notify_chat.php";
+
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_chat);
+        ActionBar actionBar = getSupportActionBar();
+        actionBar.hide();
+        data = new ArrayList<>();
+
+        tv_recipient = findViewById(R.id.tv_recipient);
+        tv_bio = findViewById(R.id.tv_bio);
+        bt_chat = findViewById(R.id.bt_chat);
+        et_chat = findViewById(R.id.et_chat);
+        iv_scroll = findViewById(R.id.iv_scroll);
+        civChatProfileImage = findViewById(R.id.civChatProfileImage);
+        rl_chat = (RelativeLayout) findViewById(R.id.rl_chat);
+        tv_info = findViewById(R.id.tv_info);
+        //mChatAdapter = new ChatListAdapter(this, messageList);
+
+        mChatRecyclerView = (RecyclerView) findViewById(R.id.rv_chat);
+        layoutManager = new LinearLayoutManager(this);
+        mChatRecyclerView.setHasFixedSize(true);
+        mChatRecyclerView.setLayoutManager(layoutManager);
+        mChatAdapter = new ChatListAdapter(getApplicationContext(), data);
+        mChatAdapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
+            @Override
+            public void onItemRangeInserted(int positionStart, int itemCount) {
+                layoutManager.smoothScrollToPosition(mChatRecyclerView, null, mChatAdapter.getItemCount());
+            }
+        });
+
+
+        refreshTime();
+
+        // Preference class instance for username retrieval
+        userPreferences = getApplicationContext().getSharedPreferences(UserPREFERENCES, Context.MODE_PRIVATE);
+        username = userPreferences.getString(User, "");
+
+        Intent i = getIntent();
+        recipient_dp = i.getStringExtra("dp");
+        bio = i.getStringExtra("bio");
+        String recipient =  i.getStringExtra("recipient");
+
+        Glide.with(getApplicationContext()).load(recipient_dp)
+                .placeholder(R.drawable.ic_profile)
+                .error(R.drawable.ic_profile)
+                .into(civChatProfileImage);
+        tv_bio.setText(bio);
+        tv_recipient.setText(recipient);
+
+        bt_chat.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String message = et_chat.getText().toString();
+                if(message.equals("")){
+                    bt_chat.setEnabled(false);
+                }
+                else {
+                    InputMethodManager imm = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                    imm.hideSoftInputFromWindow(rl_chat.getWindowToken(), 0);
+                    uploadChats();
+                    et_chat.setText("");
+
+                }
+            }
+        });
+        //Show done button on phone keyboard
+        bt_chat.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    // Hide the keyboard
+                    InputMethodManager imm = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                    imm.hideSoftInputFromWindow(rl_chat.getWindowToken(), 0);
+
+                    return true;
+                }
+                return false;
+            }
+        });
+
+        getMyChat();
+
+
+
+
+    }
+
+    private  void getMyChat(){
+    StringRequest requestPostResponse = new StringRequest(Request.Method.POST, URL_GET_CHAT, new Response.Listener<String>() {
+        @Override
+        public void onResponse(String response) {
+            try {
+                List<Chat> data = new ArrayList<>();
+                JSONObject jsonObject=new JSONObject(response);
+                JSONArray array=jsonObject.getJSONArray("notify");
+                for (int i=0; i<array.length(); i++){
+
+                    JSONObject json_data=array.getJSONObject(i);
+                    Chat chat = new Chat();
+                    chat.setChatid(json_data.getString("chatid"));
+                    chat.setMessage(json_data.getString("message"));
+                    chat.setSender(json_data.getString("sender"));
+                    chat.setRecipient(json_data.getString("recipient"));
+                    chat.setRecipientDp(json_data.getString("recipientdp"));
+                    chat.setBio(json_data.getString("bio"));
+                    chat.setMedia(json_data.getString("media"));
+                    chat.setTime(json_data.getString("time"));
+                    chat.setYourChatid(json_data.getString("yourchatid"));
+                    chat.setYourMessage(json_data.getString("yourmessage"));
+                    chat.setYourSender(json_data.getString("yoursender"));
+                    chat.setYourRecipient(json_data.getString("yourrecipient"));
+                    chat.setYourRecipientDp(json_data.getString("yourrecipientdp"));
+                    chat.setYourBio(json_data.getString("yourbio"));
+                    chat.setYourMedia(json_data.getString("yourmedia"));
+                    chat.setYourTime(json_data.getString("yourtime"));
+                    data.add(chat);
+                }
+                // Setup and Handover data to recyclerview
+                mChatAdapter = new ChatListAdapter(getApplicationContext(), data);
+                mChatRecyclerView.setAdapter(mChatAdapter);
+
+            } catch (JSONException e) {
+            }
+        }
+    }, new Response.ErrorListener() {
+        @Override
+        public void onErrorResponse(VolleyError error) {
+            mChatRecyclerView.setVisibility(GONE);
+            tv_info.setVisibility(View.VISIBLE);
+        }
+    }){
+        @Override
+        protected Map<String, String> getParams()  {
+            Map<String,String>params=new HashMap<String, String>();
+            Intent i = getIntent();
+            userPreferences = getApplicationContext().getSharedPreferences(UserPREFERENCES, Context.MODE_PRIVATE);
+            String sender = userPreferences.getString(User, "");
+            String recipient =  i.getStringExtra("recipient");
+
+            params.put("sender", sender);
+            params.put("recipient", recipient);
+            return params;
+        }
+    };
+        requestPostResponse.setRetryPolicy(new DefaultRetryPolicy(35000,DefaultRetryPolicy.DEFAULT_MAX_RETRIES, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
+        AppController.getInstance(getApplicationContext()).addToRequestQueue(requestPostResponse);
+
+}
+
+    private void uploadChats() {
+        class uploadMediaText extends AsyncTask<String, Void, String> {
+
+            ImageRequestHandler rh = new ImageRequestHandler();
+
+            @Override
+            protected void onPreExecute() {
+                super.onPreExecute();
+
+            }
+
+            @Override
+            protected void onPostExecute(String s) {
+                super.onPostExecute(s);
+
+                if (s.equals("")) {
+                  //  Toast.makeText(getApplicationContext(), "Could not upload chat", Toast.LENGTH_LONG).show();
+
+                } else if (s.contains("Successfully Uploaded")) {
+                  //  Toast.makeText(getApplicationContext(), "Chat Uploaded", Toast.LENGTH_LONG).show();
+                    et_chat.setText("");
+                    getMyChat();
+
+
+                } else if (s.contains("Error")) {
+                    Toast.makeText(getApplicationContext(), "Error uploading chat", Toast.LENGTH_LONG).show();
+
+
+                }
+            }
+
+            @Override
+            protected String doInBackground(String... params) {
+                String message = et_chat.getText().toString();
+                Intent i = getIntent();
+                String recipientdp = i.getStringExtra("dp");
+                String bio = i.getStringExtra("bio");
+                String recipient = i.getStringExtra("recipient");
+                String  sender = userPreferences.getString(User, "");
+
+
+                HashMap<String, String> data = new HashMap<>();
+                data.put("message", message);
+                data.put("sender", sender);
+                data.put("recipient", recipient);
+                data.put("recipientdp", recipientdp);
+                data.put("bio", bio);
+
+
+                return rh.sendPostRequest(UPLOAD_CHAT_URL, data);
+            }
+        }
+        uploadMediaText ui = new uploadMediaText();
+        ui.execute();
+    }
+
+    private void notifyChat() {
+        class uploadMediaText extends AsyncTask<String, Void, String> {
+
+
+            ImageRequestHandler rh = new ImageRequestHandler();
+
+            @Override
+            protected void onPreExecute() {
+                super.onPreExecute();
+
+            }
+
+            @Override
+            protected void onPostExecute(String s) {
+                super.onPostExecute(s);
+
+                if (s.equals("")) {
+
+                } else if (s.contains("Successfully Uploaded")) {
+
+                } else if (s.contains("Error")) {
+
+
+                }
+            }
+
+            @Override
+            protected String doInBackground(String... params) {
+
+                Intent i = getIntent();
+                String  sender = userPreferences.getString(User, "");
+                String recipient = i.getStringExtra("username");
+                String recipientdp = i.getStringExtra("dp");
+                String bio = i.getStringExtra("bio");
+
+
+                HashMap<String, String> data = new HashMap<>();
+                data.put("sender", sender);
+                data.put("recipient", recipient);
+                data.put("recipientdp", recipientdp);
+                data.put("bio", bio);
+
+                return rh.sendPostRequest(NOTIFY_CHAT_URL, data);
+            }
+        }
+        uploadMediaText ui = new uploadMediaText();
+        ui.execute();
+    }
+
+
+
+
+
+    private void refreshTime() {
+        new Timer().schedule(new TimerTask() {
+            @Override
+            public void run() {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        getMyChat();
+                    }
+                });
+            }
+        },0,5000);
+    }
+
+
+
+
+}
